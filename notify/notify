@@ -1,0 +1,339 @@
+#!/bin/bash
+
+# Resolve the script's real location (follows symlinks) so the bundled
+# assets/ folder is found correctly no matter where this is run from or
+# how it's invoked (PATH, symlink, relative path, etc).
+SCRIPT_PATH="$(readlink -f "$0")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+ASSETS_DIR="$SCRIPT_DIR/assets"
+
+# Namespaced under datsforge so it won't collide with another app's config.
+CONFIG_DIR="$HOME/.config/datsforge/notify"
+CONFIG_FILE="$CONFIG_DIR/config"
+
+DEFAULT_SLOT=1
+DEFAULT_MSG_DONE="---Task done sensei!---"
+DEFAULT_MSG_BYE="---See ya sensei!---"
+
+# Bundled fallback sounds, shipped in assets/ next to this script.
+# These are always available even if the user hasn't customized anything.
+declare -A DEFAULT_SOUNDS
+DEFAULT_SOUNDS[0]="$ASSETS_DIR/634441__sophieciruela__notification.wav"
+DEFAULT_SOUNDS[1]="$ASSETS_DIR/634450__sophieciruela__success.wav"
+DEFAULT_SOUNDS[2]="$ASSETS_DIR/751862__def__success-sound.wav"
+DEFAULT_SOUNDS[3]="$ASSETS_DIR/751863__def__failure-notification-sound.wav"
+DEFAULT_SOUNDS[4]="$ASSETS_DIR/751890__def__monophonic-synth-fanfare-sound.wav"
+DEFAULT_SOUNDS[5]="$ASSETS_DIR/276607__mickleness__ringtone-foofaraw.wav"
+DEFAULT_SOUNDS[6]="$ASSETS_DIR/276608__mickleness__ringtone-fanta.wav"
+DEFAULT_SOUNDS[7]="$ASSETS_DIR/276614__mickleness__ludic.wav"
+DEFAULT_SOUNDS[8]="$ASSETS_DIR/482653__joao_janz__bonus-points-1_1.wav"
+DEFAULT_SOUNDS[9]="$ASSETS_DIR/504784__joao_janz__reward-notification-3_1.wav"
+
+# User overrides, populated from CONFIG_FILE by load_config (empty until
+# then). Slots not present here fall back to DEFAULT_SOUNDS.
+declare -A USER_SOUNDS
+MSG_DONE="$DEFAULT_MSG_DONE"
+MSG_BYE="$DEFAULT_MSG_BYE"
+
+# Config file format is plain "key=value" lines, one per setting:
+#   0=/path/to/sound.wav   -> sound override for slot 0
+#   msg_done=Some text     -> custom "done" message
+#   msg_bye=Some text      -> custom "bye" message
+# A single digit key routes to USER_SOUNDS, msg_done/msg_bye route to the
+# message variables. Anything else (blank lines, comments) is ignored.
+load_config() {
+    [[ -f "$CONFIG_FILE" ]] || return
+    local key val
+    while IFS='=' read -r key val; do
+        [[ -z "$key" || "$key" == \#* ]] && continue
+        case "$key" in
+            [0-9]) USER_SOUNDS[$key]="$val" ;;
+            msg_done) MSG_DONE="$val" ;;
+            msg_bye) MSG_BYE="$val" ;;
+        esac
+    done < "$CONFIG_FILE"
+}
+
+# Writes or overwrites a single "key=value" line in the config file.
+# Used for both sound slots (key = digit) and messages (key = msg_done/bye).
+set_config_value() {
+    local key="$1"
+    local val="$2"
+    mkdir -p "$CONFIG_DIR"
+    touch "$CONFIG_FILE"
+    grep -v "^$key=" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" 2>/dev/null
+    echo "$key=$val" >> "$CONFIG_FILE.tmp"
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+}
+
+# Deletes a single key's line from the config file, if present.
+remove_config_value() {
+    local key="$1"
+    [[ -f "$CONFIG_FILE" ]] || return
+    grep -v "^$key=" "$CONFIG_FILE" > "$CONFIG_FILE.tmp"
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+}
+
+# Strips every sound-slot line (single digit key) from the config, leaving
+# message settings untouched. Used by -R/--reset-sounds.
+reset_all_sounds() {
+    [[ -f "$CONFIG_FILE" ]] || return
+    grep -vE "^[0-9]=" "$CONFIG_FILE" > "$CONFIG_FILE.tmp"
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+}
+
+is_valid_slot() {
+    [[ "$1" =~ ^[0-9]$ ]]
+}
+
+# Echoes the resolved path for a slot, falling back to default if the
+# user's file is missing. Warnings go to stderr.
+resolve_sound() {
+    local slot="$1"
+    local user_path="${USER_SOUNDS[$slot]}"
+
+    if [[ -n "$user_path" ]]; then
+        if [[ -f "$user_path" ]]; then
+            echo "$user_path"
+            return
+        fi
+        echo "warning: mapped sound for slot $slot not found: $user_path" >&2
+        echo "warning: falling back to default sound" >&2
+    fi
+
+    echo "${DEFAULT_SOUNDS[$slot]}"
+}
+
+print_help() {
+    cat << EOF
+notify - Play a notification sound on demand.
+
+This does not detect when a task finishes on its own — chain it with &&
+after a command so it runs once that command completes, e.g.:
+    long-running-command && notify
+    ./build.sh && notify 5
+
+Usage:
+    notify [NUMBER]
+    notify -a, --add NUMBER FILE
+    notify -d, --remove NUMBER
+    notify -l, --list
+    notify -R, --reset-sounds
+    notify -m, --message done|bye [TEXT]
+    notify -m, --message reset done|bye
+
+Examples:
+    notify
+        Play the default notification sound (slot $DEFAULT_SLOT).
+    notify 5
+        Play sound number 5.
+    notify -a 5 ~/Music/mysound.wav
+        Map slot 5 to your own sound file.
+    notify -d 5
+        Remove your override for slot 5, reverting to the default.
+    notify -l
+        Show what each slot 0-9 currently plays.
+    notify -R
+        Remove all overrides, reverting every slot to its default sound.
+    notify -m done "Build finished!"
+        Change the message shown when a sound finishes playing.
+    notify -m bye "Catch you later"
+        Change the message shown after stopping a sound early.
+    notify -m done
+        Show the current "done" message.
+    notify -m reset bye
+        Revert the "bye" message to its default.
+
+Options:
+    -h, --help
+        Show this help message.
+
+Press any key while a sound is playing to stop it.
+EOF
+}
+
+cmd_add() {
+    local slot="$1"
+    local file="$2"
+
+    if ! is_valid_slot "$slot"; then
+        echo "error: slot must be a single digit 0-9" >&2
+        exit 1
+    fi
+    if [[ -z "$file" ]]; then
+        echo "error: no file given" >&2
+        exit 1
+    fi
+
+    # Store an absolute path: we reference the user's file in place rather
+    # than copying it, so it must still resolve correctly from any cwd.
+    local abs_file
+    abs_file="$(readlink -f "$file")"
+
+    if [[ ! -f "$abs_file" ]]; then
+        echo "error: file '$file' does not exist" >&2
+        exit 1
+    fi
+
+    # Reject obviously-wrong files (e.g. .txt renamed to .wav) before
+    # saving them to config.
+    local mime
+    mime="$(file --mime-type -b "$abs_file")"
+    if [[ "$mime" != audio/* ]]; then
+        echo "error: '$file' does not look like an audio file (mime: $mime)" >&2
+        exit 1
+    fi
+
+    set_config_value "$slot" "$abs_file"
+    echo "mapped slot $slot -> $abs_file"
+}
+
+cmd_remove() {
+    local slot="$1"
+
+    if ! is_valid_slot "$slot"; then
+        echo "error: slot must be a single digit 0-9" >&2
+        exit 1
+    fi
+
+    remove_config_value "$slot"
+    echo "removed override for slot $slot (now using default)"
+}
+
+cmd_list() {
+    local slot path source status
+    for slot in 0 1 2 3 4 5 6 7 8 9; do
+        if [[ -n "${USER_SOUNDS[$slot]}" ]]; then
+            path="${USER_SOUNDS[$slot]}"
+            source="user"
+            # Flag if the user's mapped file has since been moved/deleted,
+            # since playback will silently fall back to default otherwise.
+            [[ -f "$path" ]] || status=" [MISSING]"
+        else
+            path="${DEFAULT_SOUNDS[$slot]}"
+            source="default"
+            status=""
+        fi
+        printf "%d  [%s]%s  %s\n" "$slot" "$source" "$status" "$path"
+        status=""
+    done
+}
+
+cmd_reset_sounds() {
+    reset_all_sounds
+    echo "all sound slots reset to defaults"
+}
+
+cmd_message() {
+    local arg1="$1"
+    local which text
+    shift
+
+    # Two call shapes to support:
+    #   notify -m done "text"   -> arg1="done", rest is the text
+    #   notify -m reset done    -> arg1="reset", next word is which message
+    if [[ "$arg1" == "reset" ]]; then
+        which="$1"
+    else
+        which="$arg1"
+        text="$*"
+    fi
+
+    local key default_var current_var
+    case "$which" in
+        done) key="msg_done"; default_var="$DEFAULT_MSG_DONE"; current_var="$MSG_DONE" ;;
+        bye) key="msg_bye"; default_var="$DEFAULT_MSG_BYE"; current_var="$MSG_BYE" ;;
+        *)
+            echo "error: usage: notify -m, --message done|bye [TEXT]" >&2
+            echo "       notify -m, --message reset done|bye" >&2
+            exit 1
+            ;;
+    esac
+
+    if [[ "$arg1" == "reset" ]]; then
+        remove_config_value "$key"
+        echo "reset '$which' message to default: $default_var"
+        return
+    fi
+
+    # No text given -> just show the current value instead of setting it.
+    if [[ -z "$text" ]]; then
+        echo "$current_var"
+        return
+    fi
+
+    set_config_value "$key" "$text"
+    echo "'$which' message set to: $text"
+}
+
+cmd_play() {
+    local slot="${1:-$DEFAULT_SLOT}"
+
+    if ! is_valid_slot "$slot"; then
+        echo "error: invalid selection '$slot', must be a single digit 0-9" >&2
+        exit 1
+    fi
+
+    local sound_file
+    sound_file="$(resolve_sound "$slot")"
+
+    if [[ ! -f "$sound_file" ]]; then
+        echo "notify-error: sound file '$sound_file' not found!" >&2
+        exit 1
+    fi
+
+    echo "$MSG_DONE"
+    echo "Press any key to stop."
+
+    # Run aplay in the background so we can poll for a keypress while it
+    # plays, and kill it early if the user wants to stop the sound.
+    aplay "$sound_file" 2>/dev/null &
+    local sound_pid=$!
+
+    local key
+    while kill -0 "$sound_pid" 2>/dev/null; do
+        read -rsn1 -t 0.1 key
+        if [[ -n "$key" ]]; then
+            kill "$sound_pid" 2>/dev/null
+            wait "$sound_pid" 2>/dev/null
+            echo -e "$MSG_BYE"
+            exit 0
+        fi
+    done
+
+    # Sound finished playing on its own (no keypress).
+    kill "$sound_pid" 2>/dev/null
+    wait "$sound_pid" 2>/dev/null
+    echo "$MSG_BYE"
+}
+
+load_config
+
+# Flags are matched as exact strings, not bundled getopts-style, so each
+# short flag must be unique and not a prefix of another (e.g. -d vs -R).
+case "$1" in
+    -h|--help)
+        print_help
+        ;;
+    -a|--add)
+        cmd_add "$2" "$3"
+        ;;
+    -d|--remove)
+        cmd_remove "$2"
+        ;;
+    -l|--list)
+        cmd_list
+        ;;
+    -R|--reset-sounds)
+        # Capital -R marks this as the "bigger" destructive action vs -d
+        # (clears every slot override at once, not just one).
+        cmd_reset_sounds
+        ;;
+    -m|--message)
+        cmd_message "$2" "${@:3}"
+        ;;
+    *)
+        cmd_play "$1"
+        ;;
+esac
+

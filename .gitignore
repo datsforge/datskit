@@ -1,0 +1,144 @@
+########################################################
+# Custom .gitignore Template by a LibGDX Game Developer
+# ------------------------------------------------------
+# This is a tailored ignore list optimized for
+# LibGDX-based game development (multi-platform: Android,
+# Desktop, HTML/GWT, iOS, TeaVM, and more).
+#
+# Feel free to modify this based on your project needs.
+# Some entries may be irrelevant if you're not using
+# specific platforms (e.g., RoboVM, MOE, GWT).
+#
+# Author: datsforge (https://datsforge.com)
+########################################################
+
+# === GRADLE ===
+.gradle/
+build/
+**/build/
+gradle-app.setting
+/gradle/gradle-daemon-jvm.properties
+
+# === JAVA ===
+*.class
+*.war
+*.ear
+*.jar
+hs_err_pid*
+.attach_pid*
+
+# === ANDROID ===
+/android/build/
+/android/gen/
+/android/out/
+/android/libs/armeabi-v7a/
+/android/libs/arm64-v8a/
+/android/libs/x86/
+/android/libs/x86_64/
+local.properties
+com_crashlytics_export_strings.xml
+
+# === CORE MODULE ===
+/core/build/
+/core/bin/
+
+# === DESKTOP (LWJGL2 & LWJGL3) ===
+/lwjgl2/build/
+/lwjgl2/bin/
+/lwjgl3/build/
+/lwjgl3/bin/
+
+# === GWT / HTML5 (GWT & TeaVM) ===
+/html/build/
+/html/bin/
+/html/war/
+/html/gwt-unitCache/
+/html/war/WEB-INF/deploy/
+/html/war/WEB-INF/classes/
+.gwt/
+gwt-unitCache/
+www-test/
+.gwt-tmp/
+.apt_generated/
+
+# === TEAVM ===
+/teavm/build/
+/teavm/bin/
+
+# === ROBO VM (iOS) ===
+/ios/robovm-build/
+
+# === iOS (MOE & Xcode) ===
+/ios/build/
+/ios/bin/
+/ios/xcode/*.xcodeproj/*
+!/ios/xcode/*.xcodeproj/xcshareddata
+!/ios/xcode/*.xcodeproj/project.pbxproj
+/ios/xcode/native/
+/ios/IOSLauncher.app
+/ios/IOSLauncher.app.dSYM
+
+# === IOS-MOE ===
+/ios-moe/build/
+/ios-moe/bin/
+
+# === SERVER / HEADLESS / SHARED ===
+/server/build/
+/server/bin/
+/headless/build/
+/headless/bin/
+/shared/build/
+/shared/bin/
+
+# === IntelliJ IDEA / Android Studio ===
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# === Eclipse ===
+.classpath
+.project
+.settings/
+.metadata/
+.loadpath
+.externalToolBuilders/
+*.launch
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# === NetBeans ===
+nbactions.xml
+nb-configuration.xml
+/nbbuild/
+/dist/
+/nbdist/
+**/nbproject/private/
+**/nbbuild/
+/**/dist/
+/**/nbdist/
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+$RECYCLE.BIN/
+
+# === Kotlin / Misc ===
+/.kotlin/
+/assets/assets.txt
+
+# === TEMP Files ===
+*~
+*.*#
+*#*#
+
+# === Native Image ===
+**/resource-config.json
+
+# === Gradle Wrapper Files ===
+!gradle/wrapper/gradle-wrapper.jar
